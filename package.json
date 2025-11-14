@@ -1,0 +1,18 @@
+{
+  "name": "crypto-auto-tx",
+  "version": "1.0.0",
+  "description": "Auto transaction approval for crypto testnet",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js"
+  },
+  "dependencies": {
+    "@walletconnect/ethereum-provider": "^2.13.2",
+    "@walletconnect/sign-client": "^2.23.0",
+    "@walletconnect/universal-provider": "^2.13.2",
+    "crypto": "^1.0.1",
+    "dotenv": "^16.3.1",
+    "ethers": "^6.15.0",
+    "node-telegram-bot-api": "^0.64.0"
+  }
+}

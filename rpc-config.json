@@ -1,0 +1,28 @@
+{
+  "currentRpc": "https://rpc.hoodi.ethpandaops.io/",
+  "currentChainId": 560048,
+  "currentRpcName": "hoodi",
+  "savedRpcs": {
+    "sepolia": {
+      "name": "Sepolia Testnet",
+      "rpc": "https://sepolia.infura.io/v3/your-api-key",
+      "chainId": 11155111
+    },
+    "custom_1762934242714": {
+      "name": "hoodi",
+      "rpc": "https://rpc.hoodi.ethpandaops.io/",
+      "chainId": 560048
+    },
+    "custom_1762938811407": {
+      "name": "raly",
+      "rpc": "https://devnet-rpc.rayls.com/",
+      "chainId": 123123
+    },
+    "custom_1763123836863": {
+      "name": "incentv 1",
+      "rpc": "https://rpc3.testnet.incentiv.io/",
+      "chainId": 28802
+    }
+  },
+  "updatedAt": "2025-11-14T16:21:36.565Z"
+}

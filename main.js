@@ -10,6 +10,13 @@
  * == 2. [FIX] 'List Wallet' sekarang menjadi fungsional untuk alur WC.
  * == 3. [FEAT] Fitur 'Buat Wallet Baru' dihapus (CLI & Telegram),
  * ==    fokus hanya pada 'Import Wallet'.
+ * ==
+ * == PERUBAHAN (v15.3.1 - STABILITY FIX):
+ * == 1. [FIX] Mencegah crash "Missing or invalid" saat DApp disconnect.
+ * ==    Fungsi cleanup() dibuat async untuk menangani promise rejection
+ * ==    dari signClient.disconnect().
+ * == 2. [FIX] Menambahkan `this.session = null` di event 'session_delete'
+ * ==    untuk memastikan state internal bersih.
  * =============================================================================
  */
 
@@ -1452,6 +1459,7 @@ class CryptoAutoTx {
         this.signClient.on('session_delete', () => {
             console.log('🔌 Session disconnected');
             this.isConnected = false;
+            this.session = null; // <-- [STABILITY FIX] Bersihkan session
             if (this.bot) this.bot.sendMessage(this.config.TELEGRAM_CHAT_ID, '🔴 WALLETCONNECT DISCONNECTED');
         });
         this.signClient.on('session_event', (event) => console.log('📨 Session event received:', event));
@@ -1850,19 +1858,30 @@ class CryptoAutoTx {
         // SIGINT akan ditangani oleh handler global di 'main'
     }
 
-    cleanup() {
+    // [STABILITY FIX] Mengubah cleanup menjadi async
+    async cleanup() {
         if (this.signClient && this.session) {
             try {
-                this.signClient.disconnect({
+                console.log('🔌 Attempting to disconnect WalletConnect session...');
+                await this.signClient.disconnect({
                     topic: this.session.topic,
                     reason: { code: 6000, message: 'User disconnected' }
                 });
+                console.log('✅ WalletConnect session disconnected.');
             } catch (error) {
-                console.log('⚠️ Error disconnecting WalletConnect:', error.message);
+                // Error ini wajar jika sesi sudah diputus oleh DApp
+                if (error.message.includes('Missing or invalid')) {
+                    console.log('ℹ️ Session was already disconnected.');
+                } else {
+                    console.log('⚠️ Error disconnecting WalletConnect:', error.message);
+                }
             }
         }
+        this.session = null; // Pastikan session di-clear
+        this.isConnected = false; // Pastikan status koneksi di-clear
+
         if (this.bot) {
-            // Hentikan polling hanya jika ini bot notifikasi (bukan controller)
+            // Hentikan polling only jika ini bot notifikasi (bukan controller)
              if (this.rl) { // Indikator mode CLI
                 this.bot.stopPolling();
              }
@@ -1891,7 +1910,7 @@ class CryptoAutoTx {
                     break;
                 case '5':
                     console.log('👋 Keluar...');
-                    this.cleanup();
+                    await this.cleanup(); // [STABILITY FIX] await cleanup
                     this.rl.close();
                     break;
                 default:
@@ -1901,7 +1920,7 @@ class CryptoAutoTx {
             }
         } catch (error) {
             console.log('❌ Error:', error.message);
-            this.cleanup();
+            await this.cleanup(); // [STABILITY FIX] await cleanup
             if (this.rl) {
                  this.rl.close();
             }
@@ -1929,10 +1948,11 @@ async function runTerminalMode(SECURE_CONFIG) {
             output: process.stdout
         });
 
-        process.on('SIGINT', () => {
+        // [STABILITY FIX] Mengubah SIGINT handler menjadi async
+        process.on('SIGINT', async () => {
             console.log('\n👋 Bot stopped by user (Ctrl+C). Cleaning up...');
             if (app) {
-                app.cleanup();
+                await app.cleanup(); // await cleanup
             }
             if (mainRl) {
                 mainRl.close();
@@ -1999,7 +2019,7 @@ async function runTerminalMode(SECURE_CONFIG) {
         ui.stopLoading(); 
         ui.showNotification('error', `Application error: ${error.message}`);
         
-        if (app) app.cleanup(); 
+        if (app) await app.cleanup(); // [STABILITY FIX] await cleanup
         if (mainRl) mainRl.close(); 
         process.exit(1);
     }
@@ -2965,7 +2985,7 @@ class TelegramFullController {
         } else if (text === '🔗 WalletConnect') {
             this.showWalletConnectMenu(chatId);
         } else if (text === '🔐 Logout') {
-            this.logout(chatId);
+            await this.logout(chatId); // [STABILITY FIX] await logout
         } else {
             // Handle state-based inputs
             const userState = this.userStates.get(chatId);
@@ -3100,7 +3120,7 @@ class TelegramFullController {
                 await this.sendBotStatus(chatId);
             }
             else if (data === 'wc_disconnect') {
-                this.cryptoApp.cleanup(); 
+                await this.cryptoApp.cleanup(); // [STABILITY FIX] await cleanup
                 this.controllerBot.sendMessage(chatId, '✅ WalletConnect disconnected.');
                 this.showWalletConnectMenu(chatId); 
             }
@@ -3164,13 +3184,14 @@ class TelegramFullController {
         }
     }
 
-    logout(chatId) {
+    // [STABILITY FIX] Mengubah logout menjadi async
+    async logout(chatId) {
         this.isAuthenticated = false;
         this.currentUser = null;
         this.userStates.clear();
         
         if (this.cryptoApp) {
-            this.cryptoApp.cleanup();
+            await this.cryptoApp.cleanup(); // await cleanup
         }
         
         const menu = { reply_markup: { remove_keyboard: true } };
@@ -3183,13 +3204,14 @@ class TelegramFullController {
         );
     }
 
-    cleanup() {
+    // [STABILITY FIX] Mengubah cleanup menjadi async
+    async cleanup() {
         if (this.controllerBot) {
             this.controllerBot.stopPolling();
             console.log('🎛️ Controller Bot stopped.');
         }
         if (this.cryptoApp) {
-            this.cryptoApp.cleanup();
+            await this.cryptoApp.cleanup(); // await cleanup
             console.log('🤖 Crypto App cleaned up.');
         }
     }
@@ -3225,10 +3247,11 @@ async function main() {
             console.log('📱 All features available via Telegram');
             console.log(`🔐 Login via: /start di Bot Controller Anda`);
             
-            process.on('SIGINT', () => {
+            // [STABILITY FIX] Mengubah SIGINT handler menjadi async
+            process.on('SIGINT', async () => {
                 console.log('\n👋 Bot stopped by user (Ctrl+C). Cleaning up Telegram Controller...');
                 if (telegramController) {
-                    telegramController.cleanup();
+                    await telegramController.cleanup(); // await cleanup
                 }
                 process.exit(0);
             });
@@ -3250,7 +3273,7 @@ async function main() {
         console.log(error);
         
         if (telegramController) {
-            telegramController.cleanup();
+            await telegramController.cleanup(); // [STABILITY FIX] await cleanup
         }
         
         process.exit(1);

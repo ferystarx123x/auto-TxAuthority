@@ -1,17 +1,15 @@
 /**
  * =============================================================================
- * == FA STARX BOT v15.2.0 (Security) + CryptoAutoTx (Functionality)
+ * == FA STARX BOT v15.3.0 (UX/Flow Refinement)
  * ==
  * == SCRIPT GABUNGAN
  * ==
- * == FUNGSI:
- * == 1. Menjalankan sistem keamanan (login, validasi) dari 'contoh keamanan.js'.
- * == 2. Setelah login berhasil, menjalankan aplikasi 'CryptoAutoTx'
- * ==    (bot WalletConnect) dari 'upgrade keamanan...'.
- * ==
- * == 🔐 JAMINAN FUNGSIONALITAS:
- * == Fungsionalitas inti 'CryptoAutoTx' tetap utuh,
- * == kini berjalan setelah lapisan keamanan.
+ * == PERUBAHAN (v15.3.0):
+ * == 1. [FIX] Alur WalletConnect: Tombol 'Ganti/Pilih Wallet' ditambah di menu
+ * ==    WalletConnect agar user bisa memilih wallet aktif sebelum konek.
+ * == 2. [FIX] 'List Wallet' sekarang menjadi fungsional untuk alur WC.
+ * == 3. [FEAT] Fitur 'Buat Wallet Baru' dihapus (CLI & Telegram),
+ * ==    fokus hanya pada 'Import Wallet'.
  * =============================================================================
  */
 
@@ -31,7 +29,6 @@ dotenv.config();
 
 // ===================================
 // == BAGIAN BARU: ENV DECRYPTOR ==
-// (Dari 'contoh keamanan.js')
 // ===================================
 
 /**
@@ -80,6 +77,11 @@ class EnvDecryptor {
             if (parts.length !== 2) {
                 // Jangan error jika nilai kosong, kembalikan null saja
                 if (!encryptedValue) return null;
+                
+                if (!encryptedValue.includes(':') && encryptedValue.length > 20) {
+                     // console.warn(`⚠️ Warning: Nilai "${encryptedValue.substring(0, 10)}..." mungkin tidak terenkripsi.`);
+                }
+                
                 throw new Error('Format nilai terenkripsi tidak valid.');
             }
             
@@ -101,7 +103,6 @@ class EnvDecryptor {
 
 // =======================================
 // == BAGIAN BARU: LOAD & DECRYPT CONFIG ==
-// (MODIFIKASI: TELEGRAM_CHAT_ID DIHAPUS, akan diinput saat runtime)
 // =======================================
 
 /**
@@ -120,7 +121,6 @@ function loadConfiguration() {
     }
     
     // Cek key esensial untuk bot CryptoAutoTx
-    // TELEGRAM_BOT_TOKEN bersifat opsional, WALLETCONNECT_PROJECT_ID wajib
     if (!process.env.WALLETCONNECT_PROJECT_ID_ENCRYPTED) {
          console.error('❌ FATAL ERROR: File .env tidak lengkap (Bot CryptoAutoTx).');
          console.error('Harap tambahkan WALLETCONNECT_PROJECT_ID_ENCRYPTED, dll.');
@@ -139,26 +139,23 @@ function loadConfiguration() {
         config.GITHUB_BACKUP_URL = envDecryptor.decryptValue(process.env.GITHUB_BACKUP_URL_ENCRYPTED);
         config.ENCRYPTION_SALT = envDecryptor.decryptValue(process.env.ENCRYPTION_SALT_ENCRYPTED);
         
-        // **MODIFIKASI**: Konfigurasi untuk CryptoAutoTx
-        // TELEGRAM_CHAT_ID DIHAPUS dari sini.
+        // Konfigurasi untuk CryptoAutoTx
         config.TELEGRAM_BOT_TOKEN = envDecryptor.decryptValue(process.env.TELEGRAM_BOT_TOKEN_ENCRYPTED);
+        config.TELEGRAM_CONTROLLER_TOKEN = envDecryptor.decryptValue(process.env.TELEGRAM_CONTROLLER_TOKEN_ENCRYPTED);
+
         config.WALLETCONNECT_PROJECT_ID = envDecryptor.decryptValue(process.env.WALLETCONNECT_PROJECT_ID_ENCRYPTED);
         config.DEFAULT_RPC_URL = envDecryptor.decryptValue(process.env.DEFAULT_RPC_URL_ENCRYPTED);
         config.DEFAULT_RPC_CHAIN_ID = parseInt(envDecryptor.decryptValue(process.env.DEFAULT_RPC_CHAIN_ID_ENCRYPTED), 10);
         
-        // **BARU**: Kunci opsional untuk Telegram
-        const optionalKeys = ['TELEGRAM_BOT_TOKEN'];
+        const optionalKeys = ['TELEGRAM_BOT_TOKEN', 'TELEGRAM_CONTROLLER_TOKEN'];
 
         // Validasi
         for (const key in config) {
             if (!config[key]) {
-                // Cek jika key ini adalah salah satu dari yang opsional DAN tidak ada di .env
                 if (optionalKeys.includes(key) && !process.env[`${key}_ENCRYPTED`]) {
                     console.log(`ℹ️ Info: Fitur opsional "${key}" tidak dimuat.`);
-                    continue; // Lewati (jangan error)
+                    continue; 
                 }
-
-                // Jangan gagalkan jika salt tidak ada (mungkin tidak digunakan di config)
                 if (key === 'ENCRYPTION_SALT' && !process.env.ENCRYPTION_SALT_ENCRYPTED) continue; 
                 
                 throw new Error(`Gagal mendekripsi "${key}" dari .env`);
@@ -179,12 +176,8 @@ function loadConfiguration() {
     return config;
 }
 
-// Muat konfigurasi saat aplikasi dimulai
-const SECURE_CONFIG = loadConfiguration();
-
 // ===================================
 // == UI & INPUT HANDLER
-// (Dari 'contoh keamanan.js')
 // ===================================
 
 /**
@@ -249,7 +242,7 @@ class ModernUI {
             '║  ██║     ██║  ██║    ███████║   ██║   ██║  ██║██║  ██║██╔╝ ██╗███████║      ║',
             '║  ╚═╝     ╚═╝  ╚═╝    ╚══════╝   ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═╝  ╚═╝╚══════╝      ║',
             '║                                                                              ║',
-            '║                   🚀 MULTI-CHAIN TRANSFER BOT v15.2 🚀                       ║',
+            '║                   🚀 MULTI-CHAIN TRANSFER BOT v15.3 🚀                       ║',
             '║                                                                              ║',
             '╚══════════════════════════════════════════════════════════════════════════════╝'
         ];
@@ -295,7 +288,12 @@ class ModernUI {
         this.stopLoading();
         const notifTitle = title || titles[type];
         const icon = icons[type] || '📢';
-        this.createBox(`${icon} ${notifTitle}`, [message], type);
+        
+        if (Array.isArray(title)) {
+            this.createBox(`${icon} ${message}`, title, type);
+        } else {
+            this.createBox(`${icon} ${notifTitle}`, [message], type);
+        }
     }
 
     startLoading(text) {
@@ -328,7 +326,6 @@ class ModernUI {
 /**
  * @class InputHandler
  * @description Mengelola semua input pengguna dari terminal.
- * **MODIFIKASI**: Menerima 'rl' (readline interface) dari luar.
  */
 class InputHandler {
     /**
@@ -336,13 +333,18 @@ class InputHandler {
      * @param {readline.Interface} rl - Interface readline yang dibagikan.
      */
     constructor(rl) {
-        // **PERBAIKAN**: Gunakan 'rl' yang dibagikan, jangan buat yang baru.
         this.rl = rl;
-        this.ui = new ModernUI(); // UI tetap dibuat internal
+        this.ui = new ModernUI(); 
     }
 
     question(prompt) {
         return new Promise((resolve) => {
+            if (!this.rl) {
+                console.error('FATAL: InputHandler.question dipanggil tanpa readline interface.');
+                resolve(''); 
+                return;
+            }
+            
             const boxPadding = this.ui.getCenterPadding(this.ui.boxWidth);
             const leftPad = boxPadding + '  '; 
             const fullPrompt = `\n${leftPad}${this.ui.theme.secondary}» ${prompt}:${this.ui.theme.reset} `;
@@ -353,37 +355,28 @@ class InputHandler {
     }
 
     close() {
-        // **PERBAIKAN**: Jangan tutup 'rl' yang dibagikan.
-        // Penutupan akan ditangani oleh fungsi main() saat keluar.
-        // if (this.rl) {
-        //     this.rl.close();
-        // }
+        // Penutupan ditangani oleh main()
     }
 }
 
 // ===================================
 // == GITHUB PASSWORD SYNC SYSTEM
-// (Dari 'contoh keamanan.js')
 // ===================================
 
 /**
  * @class GitHubPasswordSync
  * @description Mengelola seluruh sistem keamanan, login, integritas file,
  * dan validasi GitHub.
- * **MODIFIKASI**: Menerima 'rl' (readline interface) dari luar.
  */
 class GitHubPasswordSync {
     /**
      * @constructor
-     * @param {readline.Interface} rl - Interface readline yang dibagikan.
+     * @param {readline.Interface | null} rl - Interface readline (null jika mode Telegram).
      * @param {string} adminPassword - Password admin
      * ... (parameter lainnya)
      */
     constructor(rl, adminPassword, scriptPassword, mainUrl, backupUrl, salt) {
-        // Inisialisasi UI dan Input *internal* untuk sistem keamanan
         this.ui = new ModernUI();
-        
-        // **PERBAIKAN**: Berikan 'rl' yang dibagikan ke InputHandler.
         this.input = new InputHandler(rl);
         
         this.securityFiles = [
@@ -407,7 +400,7 @@ class GitHubPasswordSync {
             algorithm: 'aes-256-gcm',
             keyIterations: 100000,
             keyLength: 32,
-            salt: salt || crypto.randomBytes(16).toString('hex'), // Gunakan salt dari .env atau buat baru
+            salt: salt || crypto.randomBytes(16).toString('hex'), 
             digest: 'sha256'
         };
         this.masterKey = this.generateMasterKey();
@@ -555,7 +548,7 @@ class GitHubPasswordSync {
                 this.fetchGitHubConfig(this.githubSources[1])
             ]);
             const validResults = [];
-            this.ui.stopLoading(); // Hentikan spinner SEBELUM console.log
+            this.ui.stopLoading(); 
             
             results.forEach((result, index) => {
                 const source = this.githubSources[index];
@@ -710,7 +703,6 @@ class GitHubPasswordSync {
         return { existing, missing };
     }
     
-    // Fungsi untuk menutup input handler keamanan
     close() {
         this.input.close();
     }
@@ -719,27 +711,22 @@ class GitHubPasswordSync {
 
 // ===================================
 // == APLIKASI UTAMA: CryptoAutoTx
-// (Dari 'upgrade keamanan...')
-// (MODIFIKASI: Menerima 'rl' (readline interface) dari luar)
 // ===================================
 
 class CryptoAutoTx {
     /**
      * @constructor
-     * @param {readline.Interface} rl - Interface readline yang dibagikan.
+     * @param {readline.Interface | null} rl - Interface readline (null jika mode Telegram).
      * @param {Object} secureConfig - Objek konfigurasi yang telah didekripsi
      */
     constructor(rl, secureConfig) {
-        // Gunakan config yang aman, bukan require('./config')
         this.config = secureConfig; 
-        
-        // **PERBAIKAN**: Gunakan 'rl' yang dibagikan, jangan buat yang baru.
         this.rl = rl;
         
         this.wallet = null;
         this.provider = null;
         this.signClient = null;
-        this.bot = null;
+        this.bot = null; // Ini untuk NOTIFIKASI (opsional)
         this.isConnected = false;
         this.session = null;
         this.walletFile = path.join(__dirname, 'wallets.enc');
@@ -747,15 +734,12 @@ class CryptoAutoTx {
         this.masterKey = null;
         this.transactionCounts = new Map();
         
-        // Gunakan RPC default dari SECURE_CONFIG
         this.currentRpc = this.config.DEFAULT_RPC_URL;
         this.currentChainId = this.config.DEFAULT_RPC_CHAIN_ID;
         this.currentRpcName = 'Default RPC (from .env)';
         
-        // Inisialisasi bot HANYA jika token DAN chat id ada
-        // (Chat ID didapat dari prompt runtime di fungsi main())
-        this.initTelegramBot(); 
-        this.loadRpcConfig(); // loadRpcConfig akan menimpa RPC default jika file ada
+        this.initTelegramBot(); // Inisialisasi bot notifikasi jika ada
+        this.loadRpcConfig(); 
     }
 
     // 🔧 RPC CONFIGURATION SYSTEM
@@ -763,7 +747,7 @@ class CryptoAutoTx {
         try {
             if (fs.existsSync(this.rpcFile)) {
                 const rpcConfig = JSON.parse(fs.readFileSync(this.rpcFile, 'utf8'));
-                this.currentRpc = rpcConfig.currentRpc || this.currentRpc; // Tetap gunakan dari .env jika tidak ada
+                this.currentRpc = rpcConfig.currentRpc || this.currentRpc; 
                 this.currentChainId = rpcConfig.currentChainId || this.currentChainId;
                 this.currentRpcName = rpcConfig.currentRpcName || this.currentRpcName;
                 this.savedRpcs = rpcConfig.savedRpcs || this.getDefaultRpcs();
@@ -781,7 +765,6 @@ class CryptoAutoTx {
     }
 
     getDefaultRpcs() {
-        // Buat daftar default, termasuk yang dari .env
         const defaultFromEnv = {
             name: 'Default RPC (from .env)',
             rpc: this.config.DEFAULT_RPC_URL,
@@ -839,7 +822,6 @@ class CryptoAutoTx {
             }
         } catch (error) {
             console.log('❌ Error setting up provider:', error.message);
-            // Fallback ke default dari .env jika error
             this.currentRpc = this.config.DEFAULT_RPC_URL;
             this.currentChainId = this.config.DEFAULT_RPC_CHAIN_ID;
             this.currentRpcName = 'Default Fallback';
@@ -847,7 +829,7 @@ class CryptoAutoTx {
         }
     }
 
-    // 🎛️ RPC MANAGEMENT MENU
+    // 🎛️ RPC MANAGEMENT MENU (CLI)
     async rpcManagementMode() {
         console.log('\n🔧 PENGATURAN RPC');
         console.log('1. Pilih RPC yang tersedia');
@@ -1161,7 +1143,7 @@ class CryptoAutoTx {
     }
 
     async listWallets(chatId) {
-        if (!this.bot) return; // Jangan lakukan apa-apa jika bot tidak ada
+        if (!this.bot) return; // Ini bot notifikasi, bukan controller
         const wallets = await this.loadWallets();
         if (Object.keys(wallets).length === 0) {
             this.bot.sendMessage(chatId, '📭 Tidak ada wallet yang disimpan');
@@ -1180,6 +1162,15 @@ class CryptoAutoTx {
     async deleteWallet(address) {
         const wallets = await this.loadWallets();
         if (wallets[address]) {
+            
+            // [FIX 1 - HAPUS WALLET AKTIF] 
+            // Cek jika wallet yang dihapus adalah wallet yang sedang aktif
+            if (this.wallet && this.wallet.address.toLowerCase() === address.toLowerCase()) {
+                this.wallet = null; // Set wallet aktif ke null
+                console.log('ℹ️ Wallet aktif saat ini telah dihapus dan di-deaktivasi.');
+            }
+            // [END FIX 1]
+
             delete wallets[address];
             if (await this.saveWallets(wallets)) {
                 console.log(`✅ Wallet dihapus: ${address}`);
@@ -1191,19 +1182,18 @@ class CryptoAutoTx {
     }
 
     initTelegramBot() {
-        // Cek config token (dari .env) DAN chat id (dari runtime prompt)
+        // Ini HANYA untuk notifikasi, BUKAN kontrol
         if (!this.config.TELEGRAM_BOT_TOKEN || !this.config.TELEGRAM_CHAT_ID) {
-            console.log('⚠️ Peringatan: Konfigurasi Telegram tidak lengkap (Token atau Chat ID tidak ada). Bot Telegram dinonaktifkan.');
+            console.log('⚠️ Peringatan: Konfigurasi Notifikasi Telegram tidak lengkap. Notifikasi dinonaktifkan.');
             return;
         }
         
         try {
-            // Gunakan token dari SECURE_CONFIG
             this.bot = new TelegramBot(this.config.TELEGRAM_BOT_TOKEN, { polling: true });
-            console.log('🤖 Telegram Bot initialized');
+            console.log('🤖 Telegram Notification Bot initialized');
             this.setupTelegramHandlers();
         } catch (error) {
-            console.log('❌ Error initializing Telegram bot:', error.message);
+            console.log('❌ Error initializing Notification bot:', error.message);
         }
     }
 
@@ -1214,22 +1204,22 @@ class CryptoAutoTx {
             const chatId = msg.chat.id;
             const text = msg.text;
             
-            // Gunakan chatId dari SECURE_CONFIG (yang diinput saat runtime)
             if (chatId.toString() !== this.config.TELEGRAM_CHAT_ID) {
-                console.log('⚠️ Unauthorized chat attempt:', chatId);
+                console.log('⚠️ Unauthorized chat attempt on NOTIFICATION BOT:', chatId);
                 return;
             }
             if (text === '/status') this.sendStatus(chatId);
             else if (text === '/start') {
                 this.bot.sendMessage(chatId, 
-                    '🚀 Crypto Auto Bot Aktif!\n\n' +
+                    '🚀 Crypto Auto Bot - NOTIFICATION CHANNEL\n\n' +
+                    'Channel ini hanya untuk notifikasi.\n' +
+                    'Gunakan Controller Bot untuk mengelola bot.\n\n' +
                     'Commands:\n' +
-                    '/status - Cek status bot\n' +
-                    '/balance - Cek balance\n' +
-                    '/wallets - List wallets\n' +
-                    '/txstats - Transaction statistics\n' +
-                    '/rpcinfo - RPC information\n\n' +
-                    'Bot siap menerima transaksi!'
+                    '/status - Cek status koneksi\n' +
+                    '/balance - Cek balance wallet aktif\n' +
+                    '/wallets - List wallets tersimpan\n' +
+                    '/txstats - Statistik transaksi\n' +
+                    '/rpcinfo - Info RPC'
                 );
             } else if (text === '/balance' && this.wallet) this.checkBalance(chatId);
             else if (text === '/wallets') this.listWallets(chatId);
@@ -1280,7 +1270,7 @@ class CryptoAutoTx {
         if (!this.bot) return;
         const status = this.isConnected ? '🟢 TERHUBUNG' : '🔴 TIDAK TERHUBUNG';
         const walletInfo = this.wallet ? `\n💳 Wallet: ${this.wallet.address}` : '\n💳 Wallet: Belum setup';
-        const message = `🤖 STATUS BOT\n` +
+        const message = `🤖 STATUS BOT (NOTIFIKASI)\n` +
                        `Status: ${status}` +
                        `${walletInfo}\n` +
                        `⛓️ Chain ID: ${this.currentChainId}\n` +
@@ -1290,6 +1280,11 @@ class CryptoAutoTx {
     }
 
     question(prompt) {
+        if (!this.rl) {
+            console.error('FATAL: CryptoAutoTx.question dipanggil tanpa readline interface (mungkin dalam mode Telegram).');
+            return Promise.resolve(''); 
+        }
+        
         return new Promise((resolve) => {
             this.rl.question(prompt, resolve);
         });
@@ -1302,7 +1297,6 @@ class CryptoAutoTx {
         console.log('='.repeat(50));
         console.log('⛓️ Chain ID:', this.currentChainId);
         console.log('🌐 RPC:', this.currentRpcName);
-        // Gunakan Project ID dari SECURE_CONFIG
         console.log('🔑 WalletConnect Project:', this.config.WALLETCONNECT_PROJECT_ID.slice(0, 4) + '...');
         console.log('💼 Saved wallets:', Object.keys(wallets).length);
         console.log('💾 Saved RPCs:', Object.keys(this.savedRpcs).length);
@@ -1316,41 +1310,54 @@ class CryptoAutoTx {
         console.log('='.repeat(50));
     }
 
+    // [PERBAIKAN] Hapus "Buat Wallet", ganti nomor
     async walletManagementMode() {
         console.log('\n💼 KELOLA WALLET');
-        console.log('1. Buat Wallet Baru');
-        console.log('2. Gunakan Wallet yang Disimpan');
+        console.log('1. Gunakan Wallet yang Disimpan');
+        console.log('2. Import Wallet Baru');
         console.log('3. Hapus Wallet');
         console.log('4. Kembali ke Menu Utama');
         const choice = await this.question('Pilih opsi (1-4): ');
         switch (choice) {
-            case '1': await this.createNewWallet(); break;
-            case '2': await this.useSavedWallet(); break;
+            case '1': await this.useSavedWallet(); break;
+            case '2': await this.importNewWalletCLI(); break;
             case '3': await this.deleteWalletMenu(); break;
             case '4': return;
             default: console.log('❌ Pilihan tidak valid!');
         }
         await this.walletManagementMode();
     }
-
-    async createNewWallet() {
-        console.log('\n🆕 BUAT WALLET BARU');
-        const newWallet = ethers.Wallet.createRandom();
-        const privateKey = newWallet.privateKey;
-        const address = newWallet.address;
-        console.log(`✅ Wallet baru dibuat!`);
-        console.log(`📍 Address: ${address}`);
-        console.log(`🔑 Private Key: ${privateKey}`);
+    
+    // [BARU] Fungsi untuk import wallet dari CLI
+    async importNewWalletCLI() {
+        console.log('\n📥 IMPORT WALLET BARU');
+        const privateKey = await this.question('Masukkan private key: ');
+        if (!privateKey) {
+             console.log('❌ Batal.');
+             return;
+        }
+        
+        let tempWallet;
+        let pkeyFormatted = privateKey.startsWith('0x') ? privateKey : '0x' + privateKey;
+        
+        try {
+            tempWallet = new ethers.Wallet(pkeyFormatted);
+        } catch (e) {
+            console.log('❌ Private key tidak valid.');
+            return;
+        }
+        
+        console.log(`📍 Address terdeteksi: ${tempWallet.address}`);
         const nickname = await this.question('Beri nama wallet (optional): ');
-        if (await this.saveWallet(privateKey, nickname)) {
+        
+        if (await this.saveWallet(pkeyFormatted, nickname)) {
             console.log(`💾 Wallet berhasil disimpan!`);
-            const useNow = await this.question('Gunakan wallet ini sekarang? (y/n): ');
-            if (useNow.toLowerCase() === 'y') {
-                this.setupWallet(privateKey);
-                await this.checkBalance();
-            }
+        } else {
+            console.log(`❌ Gagal menyimpan wallet.`);
         }
     }
+
+    // [DIHAPUS] Fungsi createNewWallet() dihapus
 
     async useSavedWallet() {
         const walletList = await this.listSavedWallets();
@@ -1415,7 +1422,6 @@ class CryptoAutoTx {
         try {
             console.log('🔄 Initializing WalletConnect...');
             this.signClient = await SignClient.init({
-                // Gunakan Project ID dari SECURE_CONFIG
                 projectId: this.config.WALLETCONNECT_PROJECT_ID,
                 metadata: {
                     name: 'Crypto Auto-Tx Bot',
@@ -1744,25 +1750,32 @@ class CryptoAutoTx {
         if (!this.wallet) {
             const msg = '❌ Wallet belum setup!';
             if (chatId && this.bot) this.bot.sendMessage(chatId, msg);
-            else console.log(msg);
-            return;
+            else if (this.rl) console.log(msg); // Hanya log jika di CLI
+            return null; // [Perbaikan] Kembalikan null jika gagal
         }
         try {
             console.log('🔄 Checking balance...');
             const balance = await this.provider.getBalance(this.wallet.address);
             const balanceEth = ethers.formatEther(balance);
             const txCount = await this.getTransactionCount(this.wallet.address);
-            console.log(`💰 Balance: ${balanceEth} ETH`);
-            console.log(`💳 Address: ${this.wallet.address}`);
-            console.log(`📊 Total Transactions: ${txCount}`);
-            console.log(`🌐 RPC: ${this.currentRpcName}`);
+            
             const message = `💰 BALANCE INFO\n\n` +
                           `Address: ${this.wallet.address}\n` +
                           `Balance: ${balanceEth} ETH\n` +
                           `Total TX: ${txCount}\n` +
                           `Chain: ${this.currentChainId}\n` +
                           `RPC: ${this.currentRpcName}`;
-            if (chatId && this.bot) this.bot.sendMessage(chatId, message);
+                          
+            if (chatId && this.bot) {
+                this.bot.sendMessage(chatId, message);
+            } else if (this.rl) {
+                 // Tampilkan di terminal jika dipanggil dari CLI
+                console.log(`💰 Balance: ${balanceEth} ETH`);
+                console.log(`💳 Address: ${this.wallet.address}`);
+                console.log(`📊 Total Transactions: ${txCount}`);
+                console.log(`🌐 RPC: ${this.currentRpcName}`);
+            }
+            
             return { balance: balanceEth, txCount: txCount };
         } catch (error) {
             console.log('❌ Error checking balance:', error.message);
@@ -1798,7 +1811,7 @@ class CryptoAutoTx {
                     }
                 }
             } else {
-                const privateKey = await this.question('Masukkan private key: ');
+                const privateKey = await this.question('Masukkan private key (Wallet tidak tersimpan): ');
                 if (!this.setupWallet(privateKey)) return;
                 const saveWallet = await this.question('Simpan wallet ini? (y/n): ');
                 if (saveWallet.toLowerCase() === 'y') {
@@ -1827,7 +1840,6 @@ class CryptoAutoTx {
         console.log('🎉'.repeat(20));
         console.log('\nTekan Ctrl+C untuk keluar');
         
-        // Kirim status HANYA jika bot berhasil diinisialisasi
         if (this.bot) {
             this.sendStatus(this.config.TELEGRAM_CHAT_ID);
         }
@@ -1849,12 +1861,11 @@ class CryptoAutoTx {
                 console.log('⚠️ Error disconnecting WalletConnect:', error.message);
             }
         }
-        // **PERBAIKAN**: Jangan tutup 'rl' yang dibagikan di sini.
-        // if (this.rl) {
-        //     this.rl.close();
-        // }
         if (this.bot) {
-            this.bot.stopPolling();
+            // Hentikan polling hanya jika ini bot notifikasi (bukan controller)
+             if (this.rl) { // Indikator mode CLI
+                this.bot.stopPolling();
+             }
         }
     }
 
@@ -1881,7 +1892,6 @@ class CryptoAutoTx {
                 case '5':
                     console.log('👋 Keluar...');
                     this.cleanup();
-                    // **PERBAIKAN**: Tutup 'rl' utama saat keluar.
                     this.rl.close();
                     break;
                 default:
@@ -1892,8 +1902,9 @@ class CryptoAutoTx {
         } catch (error) {
             console.log('❌ Error:', error.message);
             this.cleanup();
-            // **PERBAIKAN**: Tutup 'rl' utama jika ada error.
-            this.rl.close();
+            if (this.rl) {
+                 this.rl.close();
+            }
         }
     }
 }
@@ -1904,43 +1915,36 @@ class CryptoAutoTx {
 // ===================================
 
 /**
- * @function main
- * @description Fungsi utama aplikasi gabungan.
- * Menggabungkan alur login keamanan dengan eksekusi bot.
- * **MODIFIKASI**: Membuat satu 'rl' dan membagikannya.
+ * @function runTerminalMode
+ * @description Fungsi utama aplikasi gabungan (MODE TERMINAL).
  */
-async function main() {
-    // **PERBAIKAN**: Deklarasikan 'app' dan 'mainRl' di scope utama
-    // agar bisa diakses oleh error handler dan SIGINT.
+async function runTerminalMode(SECURE_CONFIG) {
     let app = null;
-    const mainRl = readline.createInterface({
-        input: process.stdin,
-        output: process.stdout
-    });
-
-    // **PERBAIKAN**: Handle graceful shutdown (Ctrl+C)
-    process.on('SIGINT', () => {
-        console.log('\n👋 Bot stopped by user (Ctrl+C). Cleaning up...');
-        if (app) {
-            app.cleanup();
-        }
-        mainRl.close();
-        process.exit(0);
-    });
-
-    // Inisialisasi UI
-    const ui = new ModernUI();
+    let mainRl = null; 
+    const ui = new ModernUI(); 
 
     try {
-        // 1. Tampilkan Banner Animasi (dari SecurityScript)
-        await ui.showAnimatedBanner(1, 0);
-        console.log(ui.getCenterPadding(50) + '🚀 FA STARX BOT - SECURITY SYSTEM');
+        mainRl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout
+        });
+
+        process.on('SIGINT', () => {
+            console.log('\n👋 Bot stopped by user (Ctrl+C). Cleaning up...');
+            if (app) {
+                app.cleanup();
+            }
+            if (mainRl) {
+                mainRl.close();
+            }
+            process.exit(0);
+        });
+    
+        console.log(ui.getCenterPadding(50) + '🚀 FA STARX BOT - TERMINAL MODE');
         console.log(ui.getCenterPadding(50) + '='.repeat(50));
 
-        // 2. Inisialisasi Sistem Keamanan (dari SecurityScript)
-        // **PERBAIKAN**: Berikan 'mainRl' ke constructor.
         const passwordSystem = new GitHubPasswordSync(
-            mainRl, // <-- Berikan 'rl' yang dibagikan
+            mainRl, 
             SECURE_CONFIG.ADMIN_PASSWORD,
             SECURE_CONFIG.SCRIPT_PASSWORD,
             SECURE_CONFIG.GITHUB_MAIN_URL,
@@ -1950,66 +1954,1305 @@ async function main() {
         
         await passwordSystem.initialize();
 
-        // 3. Verifikasi Login (dari SecurityScript)
-        // Gunakan input handler dari sistem keamanan
         const loginResult = await passwordSystem.verifyAccess();
         
         if (!loginResult.success) {
             ui.showNotification('error', '❌ Access denied. Exiting...');
-            mainRl.close(); // Tutup 'rl' sebelum keluar
+            mainRl.close(); 
             process.exit(1);
         }
 
-        // 4. MINTA CHAT ID SETELAH LOGIN
-        // Cek jika Token Bot ada di config (dari .env)
         if (SECURE_CONFIG.TELEGRAM_BOT_TOKEN) {
-            ui.createBox('💬 SETUP TELEGRAM', [
+            ui.createBox('💬 SETUP TELEGRAM (NOTIFIKASI)', [
                 'Token Bot Telegram ditemukan.',
                 'Silakan masukkan Chat ID Anda untuk menerima notifikasi.',
                 'Kosongkan jika tidak ingin mengaktifkan notifikasi.'
             ], 'info');
             
-            // **PERBAIKAN**: Gunakan input handler dari 'passwordSystem'
-            // yang sudah menggunakan 'mainRl'.
             const chatId = await passwordSystem.input.question('Telegram Chat ID');
             
             if (chatId) {
-                SECURE_CONFIG.TELEGRAM_CHAT_ID = chatId; // Tambahkan ke config
+                SECURE_CONFIG.TELEGRAM_CHAT_ID = chatId; 
                 ui.showNotification('success', '✅ Telegram Chat ID diterima.');
             } else {
                 ui.showNotification('warning', '⚠️ Chat ID kosong. Notifikasi Telegram dinonaktifkan.');
             }
         } else {
-            console.log('ℹ️ Info: Token Bot Telegram tidak ditemukan di .env, fitur notifikasi dilewati.');
+            console.log('ℹ️ Info: Token Bot Telegram (TELEGRAM_BOT_TOKEN) tidak ditemukan, notifikasi dilewati.');
         }
 
 
-        // 5. Sukses Login -> Transisi ke Aplikasi Utama
         ui.createBox('🎉 ACCESS GRANTED', [
             `Welcome, ${loginResult.accessLevel === 'admin' ? 'Administrator' : 'User'}!`,
             '',
             'Loading Crypto Auto-Tx Bot...'
         ], 'success');
         
-        await ui.sleep(2000); // Beri waktu untuk membaca pesan
-        
-        // 6. **PERBAIKAN**: Tidak perlu lagi menutup 'securityInput'
-        //    karena kita menggunakan 'mainRl' yang dibagikan.
+        await ui.sleep(2000); 
         console.clear(); 
 
-        // 7. Jalankan Aplikasi Utama (dari MainScript)
-        // **PERBAIKAN**: Berikan 'mainRl' dan SECURE_CONFIG ke constructor
         app = new CryptoAutoTx(mainRl, SECURE_CONFIG);
-        await app.run(); // app.run() akan mengambil alih terminal
+        await app.run(); 
 
     } catch (error) {
-        // Tangani error startup
         console.log(error);
-        ui.stopLoading(); // Pastikan loading stop
+        ui.stopLoading(); 
         ui.showNotification('error', `Application error: ${error.message}`);
         
-        if (app) app.cleanup(); // Bersihkan aplikasi jika sudah diinisialisasi
-        mainRl.close(); // Tutup 'rl' utama
+        if (app) app.cleanup(); 
+        if (mainRl) mainRl.close(); 
+        process.exit(1);
+    }
+}
+// ===================================
+// == TELEGRAM FULL CONTROLLER
+// ===================================
+
+class TelegramFullController {
+    constructor(secureConfig) {
+        this.config = secureConfig;
+        this.userStates = new Map();
+        this.controllerBot = null;
+        this.notificationBot = null; // Bot untuk notifikasi
+        this.securitySystem = null;
+        this.cryptoApp = null;
+        this.isAuthenticated = false;
+        this.currentUser = null;
+        
+        this.initBots();
+        this.initSecuritySystem();
+    }
+
+    initSecuritySystem() {
+        this.securitySystem = new GitHubPasswordSync(
+            null, // <-- Penting: null 'rl' karena tidak ada input terminal
+            this.config.ADMIN_PASSWORD,
+            this.config.SCRIPT_PASSWORD,
+            this.config.GITHUB_MAIN_URL,
+            this.config.GITHUB_BACKUP_URL,
+            this.config.ENCRYPTION_SALT
+        );
+    }
+
+    initBots() {
+        // Controller Bot (untuk semua kontrol)
+        if (this.config.TELEGRAM_CONTROLLER_TOKEN) {
+            try {
+                this.controllerBot = new TelegramBot(this.config.TELEGRAM_CONTROLLER_TOKEN, { polling: true });
+                console.log('🎛️ Telegram Full Controller Bot initialized');
+                this.setupControllerHandlers();
+            } catch (error) {
+                console.log('❌ Error initializing Controller Bot:', error.message);
+            }
+        }
+
+        // Notification Bot (untuk notifikasi transaksi)
+        if (this.config.TELEGRAM_BOT_TOKEN) {
+             try {
+                this.notificationBot = new TelegramBot(this.config.TELEGRAM_BOT_TOKEN);
+                console.log('🔔 Telegram Notification Bot ready');
+             } catch (error) {
+                console.log('❌ Error initializing Notification Bot:', error.message);
+             }
+        }
+    }
+
+    setupControllerHandlers() {
+        this.controllerBot.onText(/\/start/, (msg) => this.startSecurityFlow(msg.chat.id));
+        this.controllerBot.onText(/\/menu/, (msg) => this.showMainMenu(msg.chat.id));
+        this.controllerBot.onText(/\/status/, (msg) => this.sendBotStatus(msg.chat.id));
+        
+        this.controllerBot.on('message', (msg) => this.handleMessage(msg));
+        this.controllerBot.on('callback_query', (query) => this.handleCallback(query));
+    }
+
+    // ===================================
+    // SECURITY & AUTHENTICATION FLOW
+    // ===================================
+
+    async startSecurityFlow(chatId) {
+        if (this.isAuthenticated) {
+            this.showMainMenu(chatId);
+            return;
+        }
+
+        await this.securitySystem.initialize();
+        this.showLoginOptions(chatId);
+    }
+
+    showLoginOptions(chatId) {
+        const menu = {
+            reply_markup: {
+                keyboard: [
+                    ['1. Administrator Access'],
+                    ['2. Script Password Access']
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: true
+            }
+        };
+
+        this.controllerBot.sendMessage(chatId,
+            `🔐 FA STARX BOT SECURITY SYSTEM\n\n` +
+            `🔑 Login Methods:\n` +
+            `1. Administrator Access\n` +
+            `2. Script Password Access\n\n` +
+            `» Select login method:`,
+            menu
+        );
+    }
+
+    async handlePasswordInput(chatId, password, userState, msg) {
+        try {
+            let isValid = false;
+            let accessLevel = '';
+
+            // Hapus pesan password dari chat
+            try { await this.controllerBot.deleteMessage(chatId, msg.message_id); } catch(e) {}
+
+            if (userState.action === 'awaiting_admin_password') {
+                isValid = (password === this.securitySystem.adminPassword); 
+                accessLevel = 'admin';
+                userState.attempts = (userState.attempts || 0) + 1;
+            } else if (userState.action === 'awaiting_script_password') {
+                isValid = (password === this.securitySystem.scriptPassword); 
+                accessLevel = 'script';
+                userState.attempts = (userState.attempts || 0) + 1;
+            }
+
+            if (isValid) {
+                this.isAuthenticated = true;
+                this.currentUser = { chatId, accessLevel };
+                this.userStates.delete(chatId);
+
+                this.controllerBot.sendMessage(chatId,
+                    `✅ LOGIN SUCCESSFUL!\n\n` +
+                    `Welcome, ${accessLevel === 'admin' ? 'Administrator' : 'User'}!\n\n` +
+                    `🔄 Initializing Crypto Auto-Tx Bot...`
+                );
+
+                await this.initializeCryptoApp();
+                
+                if (this.config.TELEGRAM_BOT_TOKEN) {
+                    this.requestNotificationChatId(chatId);
+                } else {
+                     this.controllerBot.sendMessage(chatId, `ℹ️ Info: Token notifikasi (TELEGRAM_BOT_TOKEN) tidak ditemukan. Notifikasi dilewati.`);
+                     this.showMainMenu(chatId);
+                }
+
+            } else {
+                const remainingAttempts = 3 - (userState.attempts || 0);
+                if (remainingAttempts > 0) {
+                    this.controllerBot.sendMessage(chatId,
+                        `❌ Wrong password. ${remainingAttempts} attempts left\n\n` +
+                        `» Please try again:`
+                    );
+                } else {
+                    this.controllerBot.sendMessage(chatId, `🚫 ACCESS DENIED - Too many failed attempts.`);
+                    this.userStates.delete(chatId);
+                }
+            }
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Login error: ${error.message}`);
+            this.userStates.delete(chatId);
+        }
+    }
+
+    async initializeCryptoApp() {
+        try {
+            this.cryptoApp = new CryptoAutoTx(null, this.config); // <-- null 'rl'
+            
+            await this.cryptoApp.initializeWalletConnect();
+            
+            if (this.cryptoApp.signClient) {
+                this.cryptoApp.signClient.on('session_proposal', (proposal) => {
+                    this.sendNotification(`📨 WalletConnect: Session proposal received`);
+                });
+                
+                this.cryptoApp.signClient.on('session_request', (request) => {
+                    const method = request.params.request?.method || 'unknown';
+                    this.sendNotification(`📨 WalletConnect: Transaction request received (Method: ${method})`);
+                    if (this.currentUser) {
+                        this.controllerBot.sendMessage(this.currentUser.chatId, `🔔 NOTIFIKASI: Transaksi diterima (Method: ${method}). Auto-approving...`);
+                    }
+                });
+                 this.cryptoApp.signClient.on('session_delete', () => {
+                    this.sendNotification(`🔌 WalletConnect: Session disconnected`);
+                    if (this.currentUser) {
+                        this.controllerBot.sendMessage(this.currentUser.chatId, `🔌 INFO: WalletConnect session disconnected.`);
+                    }
+                });
+            }
+
+            console.log('✅ Crypto Auto-Tx Bot initialized for Telegram control');
+        } catch (error) {
+            console.log('❌ Error initializing Crypto App:', error.message);
+            if(this.currentUser) this.controllerBot.sendMessage(this.currentUser.chatId, `❌ Error initializing Crypto App: ${error.message}`);
+        }
+    }
+
+    requestNotificationChatId(chatId) {
+        this.userStates.set(chatId, { action: 'awaiting_notification_chat_id' });
+        
+        this.controllerBot.sendMessage(chatId,
+            `💬 NOTIFICATION SETUP\n\n` +
+            `Untuk menerima notifikasi transaksi:\n\n` +
+            `Kirim Chat ID untuk notifikasi:\n` +
+            `(atau ketik 'skip' untuk melewati)`
+        );
+    }
+
+    async processNotificationChatId(chatId, input) {
+        try {
+            if (input.toLowerCase() === 'skip') {
+                this.controllerBot.sendMessage(chatId, `⏭️ Notifikasi dinonaktifkan.`);
+                this.userStates.delete(chatId);
+                this.showMainMenu(chatId);
+                return;
+            }
+
+            const notificationChatId = input.trim();
+            
+            if (notificationChatId && !isNaN(notificationChatId)) {
+                this.config.TELEGRAM_CHAT_ID = notificationChatId;
+                
+                if (this.config.TELEGRAM_BOT_TOKEN) {
+                     if (!this.notificationBot) {
+                        this.notificationBot = new TelegramBot(this.config.TELEGRAM_BOT_TOKEN);
+                     }
+                     // Beri tahu cryptoApp tentang bot notifikasi dan chat ID
+                     this.cryptoApp.bot = this.notificationBot;
+                     this.cryptoApp.config.TELEGRAM_CHAT_ID = notificationChatId;
+                }
+
+                this.controllerBot.sendMessage(chatId,
+                    `✅ NOTIFICATION SETUP COMPLETE!\n\n` +
+                    `Chat ID: ${notificationChatId}\n` +
+                    `Notifikasi transaksi akan aktif.`
+                );
+
+                this.sendNotification(`🔔 NOTIFICATION BOT ACTIVATED!\nBot siap menerima notifikasi transaksi.`);
+
+            } else {
+                this.controllerBot.sendMessage(chatId, `❌ Invalid Chat ID. Harus angka. Coba lagi atau ketik 'skip':`);
+                return;
+            }
+            
+            this.userStates.delete(chatId);
+            this.showMainMenu(chatId);
+
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    // ===================================
+    // MAIN MENU & NAVIGATION
+    // ===================================
+
+    showMainMenu(chatId) {
+         if (!this.isAuthenticated || chatId !== this.currentUser.chatId) {
+             this.controllerBot.sendMessage(chatId, 'Anda harus login. Kirim /start');
+             return;
+         }
+         
+        const menu = {
+            reply_markup: {
+                keyboard: [
+                    ['💼 Wallet Management', '📊 Info & Status'],
+                    ['🌐 RPC Management', '🔗 WalletConnect'],
+                    ['🔐 Logout']
+                ],
+                resize_keyboard: true,
+                one_time_keyboard: false
+            }
+        };
+
+        this.controllerBot.sendMessage(chatId,
+            `🤖 CRYPTO AUTO-TX BOT - MAIN MENU\n\n` +
+            `Pilih menu di bawah:\n` +
+            `💼 Wallet - Kelola wallet\n` +
+            `📊 Info - Balance & status\n` +
+            `🌐 RPC - Kelola koneksi\n` +
+            `🔗 WC - Connect DApps`,
+            menu
+        );
+    }
+
+    // ===================================
+    // WALLET MANAGEMENT
+    // ===================================
+
+    // [PERBAIKAN] Hapus "Buat Baru"
+    showWalletMenu(chatId) {
+         if (!this.isAuthenticated || chatId !== this.currentUser.chatId) return;
+
+        const menu = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '📥 Import Wallet', callback_data: 'wallet_import' },
+                        { text: '📋 List/Pilih Wallet', callback_data: 'wallet_list' }
+                    ],
+                    [
+                        { text: '🗑️ Hapus Wallet', callback_data: 'wallet_delete_menu' }
+                    ],
+                    [
+                        { text: '💰 Cek Balance', callback_data: 'wallet_balance' },
+                        { text: '📊 TX Stats', callback_data: 'wallet_stats' }
+                    ],
+                    [
+                        { text: '🔙 Main Menu', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        this.controllerBot.sendMessage(chatId, '💼 WALLET MANAGEMENT:', menu);
+    }
+    
+    async showDeleteWalletMenu(chatId) {
+        try {
+            const wallets = await this.cryptoApp.loadWallets();
+            if (Object.keys(wallets).length === 0) {
+                this.controllerBot.sendMessage(chatId, '📭 Tidak ada wallet untuk dihapus.');
+                return;
+            }
+
+            const buttons = [];
+            Object.entries(wallets).forEach(([address, data]) => {
+                buttons.push([
+                    { 
+                        text: `🗑️ ${data.nickname} (${address.slice(0, 6)}...)`, 
+                        callback_data: `wallet_delete_confirm_${address}` 
+                    }
+                ]);
+            });
+            buttons.push([{ text: '🔙 Batal', callback_data: 'wallet_menu' }]);
+
+            this.controllerBot.sendMessage(chatId, 'Pilih wallet yang akan dihapus:', {
+                reply_markup: { inline_keyboard: buttons }
+            });
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    async confirmDeleteWallet(chatId, address) {
+         const wallets = await this.cryptoApp.loadWallets();
+         const walletData = wallets[address];
+         if (!walletData) {
+             this.controllerBot.sendMessage(chatId, '❌ Wallet tidak ditemukan.');
+             return;
+         }
+
+         const menu = {
+             reply_markup: {
+                 inline_keyboard: [
+                     [
+                         { text: `🔴 HAPUS ${walletData.nickname}`, callback_data: `wallet_delete_exec_${address}` },
+                         { text: '🟢 Batal', callback_data: 'wallet_menu' }
+                     ]
+                 ]
+             }
+         };
+         // [FIX 3 - PARSING ERROR] Hapus parse_mode
+         this.controllerBot.sendMessage(chatId, `Yakin ingin menghapus wallet ${walletData.nickname} (${address})?`, menu);
+    }
+
+    async executeDeleteWallet(chatId, address) {
+        try {
+            const deleted = await this.cryptoApp.deleteWallet(address);
+            if (deleted) {
+                // [FIX 3 - PARSING ERROR] Hapus parse_mode
+                this.controllerBot.sendMessage(chatId, `✅ Wallet (${address}) berhasil dihapus.`);
+            } else {
+                this.controllerBot.sendMessage(chatId, '❌ Gagal menghapus wallet.');
+            }
+            this.showWalletMenu(chatId); 
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    // [DIHAPUS] Fungsi createWallet() dihapus
+
+    async importWalletFlow(chatId) {
+        this.userStates.set(chatId, { action: 'awaiting_wallet_import' });
+        this.controllerBot.sendMessage(chatId,
+            `📥 IMPORT WALLET\n\n` +
+            `Kirim private key:\n` +
+            `Format: 0x... atau tanpa 0x\n\n` +
+            `⚠️ Private key akan dienkripsi dan disimpan aman.`
+        );
+    }
+
+    async processWalletImport(chatId, privateKey, msg) {
+        try {
+            // Hapus pesan private key
+            try { await this.controllerBot.deleteMessage(chatId, msg.message_id); } catch(e) {}
+        
+            if (!privateKey.startsWith('0x')) {
+                privateKey = '0x' + privateKey;
+            }
+
+            const wallet = new ethers.Wallet(privateKey);
+            this.userStates.set(chatId, { 
+                action: 'awaiting_wallet_name',
+                tempData: { privateKey: privateKey, address: wallet.address }
+            });
+
+            // [FIX 3 - PARSING ERROR] Hapus parse_mode
+            this.controllerBot.sendMessage(chatId,
+                `✅ Private Key Valid!\n\n` +
+                `📍 Address: ${wallet.address}\n\n` +
+                `Sekarang beri nama wallet:`
+            );
+
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Private Key invalid: ${error.message}`);
+            this.userStates.delete(chatId);
+        }
+    }
+
+    async processWalletName(chatId, walletName) {
+        const userState = this.userStates.get(chatId);
+        if (!userState?.tempData) {
+            this.controllerBot.sendMessage(chatId, '❌ Session expired.');
+            return;
+        }
+
+        try {
+            const { privateKey, address } = userState.tempData;
+            const saved = await this.cryptoApp.saveWallet(privateKey, walletName);
+            
+            if (saved) {
+                // [FIX 3 - PARSING ERROR] Hapus parse_mode
+                this.controllerBot.sendMessage(chatId,
+                    `✅ WALLET BERHASIL DISIMPAN!\n\n` +
+                    `🏷️ ${walletName}\n` +
+                    `📍 ${address}`
+                );
+
+                this.userStates.delete(chatId);
+                this.showWalletMenu(chatId);
+            }
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            this.userStates.delete(chatId);
+        }
+    }
+
+    /**
+     * [PERBAIKAN] Modifikasi listWallets untuk menerima prefix callback
+     * agar bisa digunakan oleh WalletConnect dan Wallet Management
+     */
+    async listWallets(chatId, callbackPrefix = 'wallet_select_') {
+        try {
+            const wallets = await this.cryptoApp.loadWallets();
+            
+            if (Object.keys(wallets).length === 0) {
+                this.controllerBot.sendMessage(chatId, '📭 Tidak ada wallet.');
+                return;
+            }
+
+            let message = '💼 WALLET YANG DISIMPAN:\n\n';
+            const buttons = [];
+
+            Object.entries(wallets).forEach(([address, data], index) => {
+                const isActive = this.cryptoApp.wallet?.address?.toLowerCase() === address.toLowerCase();
+                
+                message += `${isActive ? '🟢 ' : '⚪️ '}${index + 1}. ${data.nickname}\n`;
+                message += `   📍 ${address}\n`; // [FIX 3 - PARSING ERROR] Hapus backticks
+                message += `   📊 TX: ${data.initialTxCount || 0}\n\n`;
+
+                buttons.push([
+                    { 
+                        text: `${isActive ? '🟢 ' : ''}${data.nickname}`, 
+                        callback_data: `${callbackPrefix}${address}` // Gunakan prefix
+                    }
+                ]);
+            });
+
+            if (callbackPrefix === 'wallet_select_') {
+                buttons.push([{ text: '🔙 Kembali', callback_data: 'wallet_menu' }]);
+            } else {
+                 buttons.push([{ text: '🔙 Batal', callback_data: 'wc_menu' }]); // Kembali ke menu WC
+            }
+
+            // [FIX 3 - PARSING ERROR] Hapus parse_mode
+            this.controllerBot.sendMessage(chatId, message, {
+                reply_markup: { inline_keyboard: buttons }
+            });
+
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    async selectWallet(chatId, address) {
+        try {
+            const wallets = await this.cryptoApp.loadWallets();
+            const walletData = wallets[address];
+            
+            if (walletData) {
+                const setupSuccess = this.cryptoApp.setupWallet(walletData.privateKey);
+                
+                if (setupSuccess) {
+                    wallets[address].lastUsed = new Date().toISOString();
+                    await this.cryptoApp.saveWallets(wallets);
+
+                    // [FIX 3 - PARSING ERROR] Hapus parse_mode
+                    this.controllerBot.sendMessage(chatId,
+                        `✅ WALLET DIPILIH!\n\n` +
+                        `🏷️ ${walletData.nickname}\n` +
+                        `📍 ${address}\n\n` +
+                        `Wallet aktif dan siap digunakan.`
+                    );
+
+                    await this.checkBalance(chatId);
+                }
+            }
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+    
+    async getTransactionStats(chatId) {
+        if (!this.cryptoApp.wallet) {
+            this.controllerBot.sendMessage(chatId, '❌ Wallet belum setup!');
+            return;
+        }
+        try {
+            this.controllerBot.sendMessage(chatId, '📊 Getting transaction statistics...');
+            const walletInfo = await this.cryptoApp.getWalletInfo(this.cryptoApp.wallet.address);
+            const balance = await this.cryptoApp.provider.getBalance(this.cryptoApp.wallet.address);
+            const balanceEth = ethers.formatEther(balance);
+            const message = 
+                `📊 TRANSACTION STATISTICS\n\n` +
+                `💳 ${this.cryptoApp.wallet.address}\n` + // [FIX 3 - PARSING ERROR] Hapus backticks
+                `💰 Balance: ${balanceEth} ETH\n` +
+                `📈 Total Transactions: ${walletInfo.transactionCount}\n` +
+                `🕒 Status: ${walletInfo.firstSeen}\n` +
+                `⛓️ Current Block: ${walletInfo.currentBlock}\n` +
+                `🔗 Chain ID: ${this.cryptoApp.currentChainId}\n` +
+                `🌐 RPC: ${this.cryptoApp.currentRpcName}\n` +
+                `🕒 ${new Date().toLocaleString()}`;
+            
+            // [FIX 3 - PARSING ERROR] Hapus parse_mode
+            this.controllerBot.sendMessage(chatId, message);
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error getting stats: ${error.message}`);
+        }
+    }
+
+
+    // ===================================
+    // AUTO TRANSACTION MODE (WalletConnect)
+    // ===================================
+
+    // [PERBAIKAN] Tampilkan wallet aktif dan tambahkan tombol 'Ganti Wallet'
+    showWalletConnectMenu(chatId) {
+         if (!this.isAuthenticated || chatId !== this.currentUser.chatId) return;
+         
+        const status = this.cryptoApp.isConnected ? '🟢 TERHUBUNG' : '🔴 TIDAK TERHUBUNG';
+        const walletInfo = this.cryptoApp.wallet ? 
+            `🟢 Aktif: ${this.cryptoApp.wallet.address}` :  // [FIX 3 - PARSING ERROR] Hapus backticks
+            '🔴 Belum ada wallet aktif';
+        
+        const menu = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '🔄 Ganti/Pilih Wallet', callback_data: 'wc_select_wallet' }
+                    ],
+                    [
+                        { text: '🔗 Connect WC', callback_data: 'wc_connect' },
+                        { text: '🔄 Status', callback_data: 'wc_status' }
+                    ],
+                    [
+                        { text: '🔌 Disconnect', callback_data: 'wc_disconnect' },
+                    ],
+                    [
+                        { text: '🔙 Main Menu', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        // [FIX 3 - PARSING ERROR] Hapus parse_mode
+        this.controllerBot.sendMessage(chatId,
+            `🔗 WALLETCONNECT\n\n` +
+            `Status: ${status}\n` +
+            `Wallet: ${walletInfo}\n` +
+            `Chain: ${this.cryptoApp.currentChainId}`,
+            menu
+        );
+    }
+
+    // [PERBAIKAN] Cek wallet sebelum bertanya URI
+    async startWalletConnect(chatId) {
+        if (!this.cryptoApp.wallet) {
+            this.controllerBot.sendMessage(chatId, '❌ Belum ada wallet aktif. Silakan pilih wallet dulu menggunakan tombol "🔄 Ganti/Pilih Wallet".');
+            return;
+        }
+
+        this.userStates.set(chatId, { action: 'awaiting_wc_uri' });
+        
+        // [FIX 3 - PARSING ERROR] Hapus parse_mode
+        this.controllerBot.sendMessage(chatId,
+            `🔗 WALLETCONNECT SETUP\n\n` +
+            `Wallet Aktif: ${this.cryptoApp.wallet.address}\n\n` + // [FIX 3 - PARSING ERROR] Hapus backticks
+            `1. Buka DApp di browser\n` +
+            `2. Pilih WalletConnect\n` +
+            `3. Copy URI\n` +
+            `4. Kirim URI ke sini:\n`
+        );
+    }
+
+    async processWalletConnectURI(chatId, uri, msg) {
+        try {
+            // Hapus pesan URI
+            try { await this.controllerBot.deleteMessage(chatId, msg.message_id); } catch(e) {}
+        
+            this.controllerBot.sendMessage(chatId, '🔄 Menghubungkan ke WalletConnect...');
+            
+            const connected = await this.cryptoApp.connectWalletConnect(uri);
+            
+            if (connected) {
+                this.controllerBot.sendMessage(chatId,
+                    `✅ PAIRING DIMULAI!\n\n` +
+                    `Bot menunggu proposal dari DApp...`
+                );
+                
+                 this.cryptoApp.signClient.once('session_proposal', () => {
+                     // [FIX 3 - PARSING ERROR] Hapus parse_mode
+                     this.controllerBot.sendMessage(chatId,
+                        `🟢 WALLETCONNECT TERHUBUNG!\n\n` +
+                        `🤖 Bot standby - siap auto-approve transaksi!\n\n` +
+                        `💳 ${this.cryptoApp.wallet.address}\n` + // [FIX 3 - PARSING ERROR] Hapus backticks
+                        `⛓️ Chain: ${this.cryptoApp.currentChainId}\n` +
+                        `🌐 RPC: ${this.cryptoApp.currentRpcName}`
+                     );
+                     
+                     this.sendNotification(`🔗 WALLETCONNECT CONNECTED!\nDApp terhubung - siap auto-approve.`);
+                 });
+
+
+            } else {
+                this.controllerBot.sendMessage(chatId, '❌ Gagal memulai pairing. Cek URI.');
+            }
+
+            this.userStates.delete(chatId);
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            this.userStates.delete(chatId);
+        }
+    }
+
+    // ===================================
+    // RPC MANAGEMENT
+    // ===================================
+
+    showRpcMenu(chatId) {
+         if (!this.isAuthenticated || chatId !== this.currentUser.chatId) return;
+
+        const menu = {
+            reply_markup: {
+                inline_keyboard: [
+                    [
+                        { text: '📡 Pilih RPC', callback_data: 'rpc_select' },
+                        { text: '➕ Tambah RPC', callback_data: 'rpc_add' }
+                    ],
+                    [
+                        { text: '🗑️ Hapus RPC', callback_data: 'rpc_delete_menu' },
+                        { text: 'ℹ️ Info RPC', callback_data: 'rpc_info' }
+                    ],
+                    [
+                        { text: '🔙 Main Menu', callback_data: 'main_menu' }
+                    ]
+                ]
+            }
+        };
+
+        this.controllerBot.sendMessage(chatId, '🌐 RPC MANAGEMENT:', menu);
+    }
+    
+    async showRpcInfo(chatId) {
+         this.controllerBot.sendMessage(chatId,
+            `ℹ️ INFORMASI RPC SAAT INI\n\n` +
+            `🏷️ Nama: ${this.cryptoApp.currentRpcName}\n` +
+            `🔗 URL: ${this.cryptoApp.currentRpc}\n` +
+            `⛓️ Chain: ${this.cryptoApp.currentChainId}`
+        );
+    }
+    
+    async startAddRpcFlow(chatId, step = 1, data = {}) {
+        this.userStates.set(chatId, { action: 'awaiting_rpc_add', step, data });
+        
+        if (step === 1) {
+            this.controllerBot.sendMessage(chatId, '➕ TAMBAH RPC (1/3)\n\Kirim Nama RPC (contoh: RPC Sepolia):');
+        } else if (step === 2) {
+            this.controllerBot.sendMessage(chatId, '➕ TAMBAH RPC (2/3)\n\Kirim URL RPC (contoh: https://...):');
+        } else if (step === 3) {
+            this.controllerBot.sendMessage(chatId, '➕ TAMBAH RPC (3/3)\n\Kirim Chain ID (contoh: 11155111):');
+        }
+    }
+    
+    async processAddRpc(chatId, input, userState) {
+        const { step, data } = userState;
+        
+        try {
+            if (step === 1) {
+                data.name = input;
+                await this.startAddRpcFlow(chatId, 2, data);
+            } else if (step === 2) {
+                 if (!input.startsWith('http')) {
+                    this.controllerBot.sendMessage(chatId, '❌ URL tidak valid. Harus dimulai http/https. Coba lagi:');
+                    return;
+                 }
+                data.url = input;
+                await this.startAddRpcFlow(chatId, 3, data);
+            } else if (step === 3) {
+                 const chainIdNum = parseInt(input);
+                 if (isNaN(chainIdNum) || chainIdNum <= 0) {
+                    this.controllerBot.sendMessage(chatId, '❌ Chain ID tidak valid. Harus angka positif. Coba lagi:');
+                    return;
+                 }
+                data.chainId = chainIdNum;
+                
+                const key = `custom_${Date.now()}`;
+                this.cryptoApp.savedRpcs[key] = { name: data.name, rpc: data.url, chainId: data.chainId };
+                
+                if (this.cryptoApp.saveRpcConfig()) {
+                    this.controllerBot.sendMessage(chatId, `✅ RPC "${data.name}" berhasil disimpan!`);
+                    this.userStates.delete(chatId);
+                    this.showRpcMenu(chatId);
+                } else {
+                     this.controllerBot.sendMessage(chatId, `❌ Gagal menyimpan RPC.`);
+                     this.userStates.delete(chatId);
+                }
+            }
+        } catch (error) {
+             this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+             this.userStates.delete(chatId);
+        }
+    }
+    
+    async showDeleteRpcMenu(chatId) {
+        try {
+            const rpcList = Object.entries(this.cryptoApp.savedRpcs);
+            if (rpcList.length === 0) {
+                this.controllerBot.sendMessage(chatId, '📭 Tidak ada RPC untuk dihapus.');
+                return;
+            }
+
+            const buttons = [];
+            rpcList.forEach(([key, rpc]) => {
+                if (this.cryptoApp.currentRpc === rpc.rpc) {
+                     buttons.push([ { text: `🟢 ${rpc.name} (Aktif)`, callback_data: 'rpc_delete_active' } ]);
+                } else {
+                    buttons.push([
+                        { 
+                            text: `🗑️ ${rpc.name}`, 
+                            callback_data: `rpc_delete_exec_${key}` 
+                        }
+                    ]);
+                }
+            });
+            buttons.push([{ text: '🔙 Batal', callback_data: 'rpc_menu' }]);
+
+            this.controllerBot.sendMessage(chatId, 'Pilih RPC yang akan dihapus:', {
+                reply_markup: { inline_keyboard: buttons }
+            });
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+    
+    async executeDeleteRpc(chatId, rpcKey) {
+         try {
+             const rpcData = this.cryptoApp.savedRpcs[rpcKey];
+             if (!rpcData) {
+                 this.controllerBot.sendMessage(chatId, '❌ RPC tidak ditemukan.');
+                 return;
+             }
+             
+             delete this.cryptoApp.savedRpcs[rpcKey];
+             if (this.cryptoApp.saveRpcConfig()) {
+                this.controllerBot.sendMessage(chatId, `✅ RPC "${rpcData.name}" berhasil dihapus!`);
+             }
+             
+             this.showRpcMenu(chatId);
+         } catch (error) {
+             this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+         }
+    }
+
+
+    async showRpcList(chatId) {
+        try {
+            const rpcList = Object.entries(this.cryptoApp.savedRpcs);
+            
+            if (rpcList.length === 0) {
+                this.controllerBot.sendMessage(chatId, '📭 Tidak ada RPC tersimpan.');
+                return;
+            }
+
+            let message = '📡 DAFTAR RPC:\n\n';
+            const buttons = [];
+
+            rpcList.forEach(([key, rpc], index) => {
+                const isActive = this.cryptoApp.currentRpc === rpc.rpc;
+                
+                message += `${isActive ? '🟢 ' : '⚪️ '}${index + 1}. ${rpc.name}\n`;
+                message += `   🔗 ${rpc.rpc}\n`;
+                message += `   ⛓️ Chain: ${rpc.chainId}\n\n`;
+
+                buttons.push([
+                    { 
+                        text: `${isActive ? '🟢 ' : ''}${rpc.name}`, 
+                        callback_data: `rpc_use_${key}` 
+                    }
+                ]);
+            });
+
+            buttons.push([{ text: '🔙 Kembali', callback_data: 'rpc_menu' }]);
+
+            this.controllerBot.sendMessage(chatId, message, {
+                reply_markup: { inline_keyboard: buttons }
+            });
+
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    async selectRpc(chatId, rpcKey) {
+        try {
+            const selectedRpc = this.cryptoApp.savedRpcs[rpcKey];
+            
+            if (selectedRpc) {
+                this.cryptoApp.currentRpc = selectedRpc.rpc;
+                this.cryptoApp.currentChainId = selectedRpc.chainId;
+                this.cryptoApp.currentRpcName = selectedRpc.name;
+                this.cryptoApp.setupProvider();
+                this.cryptoApp.saveRpcConfig();
+
+                this.controllerBot.sendMessage(chatId,
+                    `✅ RPC DIPILIH!\n\n` +
+                    `🏷️ ${selectedRpc.name}\n` +
+                    `🔗 ${selectedRpc.rpc}\n` +
+                    `⛓️ Chain: ${selectedRpc.chainId}`
+                );
+
+                this.sendNotification(`🌐 RPC Changed: ${selectedRpc.name}`);
+            }
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    // ===================================
+    // INFO & STATUS
+    // ===================================
+    
+    showInfoMenu(chatId) {
+         if (!this.isAuthenticated || chatId !== this.currentUser.chatId) return;
+
+         const menu = {
+             reply_markup: {
+                 inline_keyboard: [
+                     [
+                         { text: '🤖 Status Bot', callback_data: 'info_status' },
+                         { text: '💰 Cek Balance', callback_data: 'wallet_balance' }
+                     ],
+                     [
+                         { text: '📊 TX Stats', callback_data: 'wallet_stats' },
+                         { text: 'ℹ️ Info RPC', callback_data: 'rpc_info' }
+                     ],
+                     [
+                         { text: '🔙 Main Menu', callback_data: 'main_menu' }
+                     ]
+                 ]
+             }
+         };
+         this.controllerBot.sendMessage(chatId, '📊 INFO & STATUS:', menu);
+    }
+
+
+    async checkBalance(chatId) {
+        if (!this.cryptoApp.wallet) {
+            this.controllerBot.sendMessage(chatId, '❌ Belum ada wallet yang dipilih.');
+            return;
+        }
+
+        try {
+            this.controllerBot.sendMessage(chatId, '🔄 Mengecek balance...');
+            
+            const balanceInfo = await this.cryptoApp.checkBalance(); 
+            
+            if (balanceInfo) {
+                // [FIX 3 - PARSING ERROR] Hapus parse_mode
+                this.controllerBot.sendMessage(chatId,
+                    `💰 BALANCE INFO\n\n` +
+                    `🏷️ Wallet: ${this.cryptoApp.wallet.address}\n` + // [FIX 3 - PARSING ERROR] Hapus backticks
+                    `💰 Balance: ${balanceInfo.balance} ETH\n` +
+                    `📊 Total TX: ${balanceInfo.txCount}\n` +
+                    `⛓️ Chain: ${this.cryptoApp.currentChainId}\n` +
+                    `🌐 RPC: ${this.cryptoApp.currentRpcName}`
+                );
+            }
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+        }
+    }
+
+    async sendBotStatus(chatId) {
+        const status = this.cryptoApp.isConnected ? '🟢 TERHUBUNG' : '🔴 TIDAK TERHUBUNG';
+        const walletInfo = this.cryptoApp.wallet ? 
+            `\n💳 Wallet: ${this.cryptoApp.wallet.address}` : // [FIX 3 - PARSING ERROR] Hapus backticks
+            '\n💳 Wallet: Belum setup';
+
+        const wallets = await this.cryptoApp.loadWallets();
+        const totalWallets = Object.keys(wallets).length;
+
+        // [FIX 3 - PARSING ERROR] Hapus parse_mode
+        this.controllerBot.sendMessage(chatId,
+            `🤖 BOT STATUS\n\n` +
+            `Status: ${status}` +
+            `${walletInfo}\n` +
+            `💼 Total Wallets: ${totalWallets}\n` +
+            `⛓️ Chain ID: ${this.cryptoApp.currentChainId}\n` +
+            `🌐 RPC: ${this.cryptoApp.currentRpcName}\n` +
+            `🔑 WC Project: ${this.config.WALLETCONNECT_PROJECT_ID?.slice(0, 8)}...\n\n` +
+            `🕒 ${new Date().toLocaleString()}`
+        );
+    }
+
+    // ===================================
+    // MESSAGE & CALLBACK HANDLERS
+    // ===================================
+
+    async handleMessage(msg) {
+        const chatId = msg.chat.id;
+        const text = msg.text;
+
+        if (!text) return;
+        
+        if (text.startsWith('/start')) {
+             await this.startSecurityFlow(chatId);
+             return;
+        }
+
+        if (!this.isAuthenticated) {
+            await this.handleSecurityMessage(chatId, text, msg);
+            return;
+        }
+        
+        if (chatId !== this.currentUser.chatId) {
+            this.controllerBot.sendMessage(chatId, '❌ Anda tidak diautorisasi.');
+            return;
+        }
+
+        // Handle main menu commands
+        if (text === '💼 Wallet Management') {
+            this.showWalletMenu(chatId);
+        } else if (text === '📊 Info & Status') {
+            this.showInfoMenu(chatId);
+        } else if (text === '🌐 RPC Management') {
+            this.showRpcMenu(chatId);
+        } else if (text === '🔗 WalletConnect') {
+            this.showWalletConnectMenu(chatId);
+        } else if (text === '🔐 Logout') {
+            this.logout(chatId);
+        } else {
+            // Handle state-based inputs
+            const userState = this.userStates.get(chatId);
+            if (userState) {
+                await this.handleUserState(chatId, text, userState, msg);
+            }
+        }
+    }
+
+    async handleSecurityMessage(chatId, text, msg) {
+        const userState = this.userStates.get(chatId);
+
+        if (!userState) {
+            if (text === '1. Administrator Access') {
+                this.userStates.set(chatId, { 
+                    action: 'awaiting_admin_password',
+                    loginType: 'admin',
+                    attempts: 0
+                });
+                this.controllerBot.sendMessage(chatId,
+                    `🔐 ADMINISTRATOR LOGIN\n\n` +
+                    `» Enter administrator password:`
+                );
+            } else if (text === '2. Script Password Access') {
+                this.userStates.set(chatId, { 
+                    action: 'awaiting_script_password', 
+                    loginType: 'script',
+                    attempts: 0
+                });
+                this.controllerBot.sendMessage(chatId,
+                    `🔐 SCRIPT LOGIN\n\n` +
+                    `» Enter script password:`
+                );
+            }
+        } else {
+            await this.handlePasswordInput(chatId, text, userState, msg);
+        }
+    }
+
+    async handleUserState(chatId, text, userState, msg) {
+        // Hapus pesan inputan user agar bersih (kecuali password, sudah dihandle)
+        if(userState.action !== 'awaiting_admin_password' && userState.action !== 'awaiting_script_password') {
+            try { await this.controllerBot.deleteMessage(chatId, msg.message_id); } catch(e) {}
+        }
+
+        switch (userState.action) {
+            case 'awaiting_notification_chat_id':
+                await this.processNotificationChatId(chatId, text);
+                break;
+            case 'awaiting_wallet_import':
+                await this.processWalletImport(chatId, text, msg);
+                break;
+            case 'awaiting_wallet_name':
+                await this.processWalletName(chatId, text);
+                break;
+            case 'awaiting_wc_uri':
+                await this.processWalletConnectURI(chatId, text, msg);
+                break;
+            case 'awaiting_rpc_add':
+                await this.processAddRpc(chatId, text, userState);
+                break;
+        }
+    }
+
+    async handleCallback(query) {
+        const chatId = query.message.chat.id;
+        const data = query.data;
+
+        if (!this.isAuthenticated || chatId !== this.currentUser.chatId) {
+             this.controllerBot.answerCallbackQuery(query.id, { text: '❌ Otorisasi Gagal. /start ulang.' });
+             return;
+        }
+        
+        try {
+            // Main menu
+            if (data === 'main_menu') {
+                this.showMainMenu(chatId);
+            }
+            // Wallet management
+            else if (data === 'wallet_menu') {
+                this.showWalletMenu(chatId);
+            }
+            // [DIHAPUS] else if (data === 'wallet_create')
+            else if (data === 'wallet_import') {
+                await this.importWalletFlow(chatId);
+            }
+            else if (data === 'wallet_list') {
+                await this.listWallets(chatId, 'wallet_select_'); // Prefix default
+            }
+            else if (data === 'wallet_balance') {
+                await this.checkBalance(chatId);
+            }
+             else if (data === 'wallet_stats') {
+                await this.getTransactionStats(chatId);
+            }
+            else if (data.startsWith('wallet_select_')) {
+                const address = data.replace('wallet_select_', '');
+                await this.selectWallet(chatId, address);
+                
+                // [FIX 2 - TAMPILKAN MENU KEMBALI]
+                this.showWalletMenu(chatId); 
+                // [END FIX 2]
+            }
+            else if (data === 'wallet_delete_menu') {
+                await this.showDeleteWalletMenu(chatId);
+            }
+            else if (data.startsWith('wallet_delete_confirm_')) {
+                const address = data.replace('wallet_delete_confirm_', '');
+                await this.confirmDeleteWallet(chatId, address);
+            }
+             else if (data.startsWith('wallet_delete_exec_')) {
+                const address = data.replace('wallet_delete_exec_', '');
+                await this.executeDeleteWallet(chatId, address);
+            }
+            
+            // [BARU] WalletConnect flow
+            else if (data === 'wc_menu') {
+                 this.showWalletConnectMenu(chatId);
+            }
+            else if (data === 'wc_select_wallet') {
+                 await this.listWallets(chatId, 'wc_wallet_picked_'); // Prefix WC
+            }
+             else if (data.startsWith('wc_wallet_picked_')) {
+                const address = data.replace('wc_wallet_picked_', '');
+                await this.selectWallet(chatId, address); // Pilih wallet
+                this.showWalletConnectMenu(chatId); // Tampilkan menu WC lagi
+            }
+            else if (data === 'wc_connect') {
+                await this.startWalletConnect(chatId);
+            }
+            else if (data === 'wc_status') {
+                await this.sendBotStatus(chatId);
+            }
+            else if (data === 'wc_disconnect') {
+                this.cryptoApp.cleanup(); 
+                this.controllerBot.sendMessage(chatId, '✅ WalletConnect disconnected.');
+                this.showWalletConnectMenu(chatId); 
+            }
+            
+            // RPC management
+            else if (data === 'rpc_menu') {
+                this.showRpcMenu(chatId);
+            }
+            else if (data === 'rpc_select') {
+                await this.showRpcList(chatId);
+            }
+            else if (data === 'rpc_add') {
+                await this.startAddRpcFlow(chatId, 1, {});
+            }
+             else if (data === 'rpc_info') {
+                await this.showRpcInfo(chatId);
+            }
+             else if (data === 'rpc_delete_menu') {
+                 await this.showDeleteRpcMenu(chatId);
+            }
+             else if (data === 'rpc_delete_active') {
+                 this.controllerBot.answerCallbackQuery(query.id, { text: '❌ Tidak bisa hapus RPC aktif', show_alert: true });
+                 return; 
+            }
+             else if (data.startsWith('rpc_delete_exec_')) {
+                const rpcKey = data.replace('rpc_delete_exec_', '');
+                await this.executeDeleteRpc(chatId, rpcKey);
+            }
+            else if (data.startsWith('rpc_use_')) {
+                const rpcKey = data.replace('rpc_use_', '');
+                await this.selectRpc(chatId, rpcKey);
+            }
+            
+            // Info Menu
+             else if (data === 'info_menu') {
+                 this.showInfoMenu(chatId);
+            }
+            else if (data === 'info_status') {
+                 await this.sendBotStatus(chatId);
+            }
+
+
+            this.controllerBot.answerCallbackQuery(query.id);
+        } catch (error) {
+            this.controllerBot.sendMessage(chatId, `❌ Error: ${error.message}`);
+            this.controllerBot.answerCallbackQuery(query.id);
+        }
+    }
+
+    // ===================================
+    // UTILITY METHODS
+    // ===================================
+
+    sendNotification(message) {
+        if (this.notificationBot && this.config.TELEGRAM_CHAT_ID) {
+            try {
+                this.notificationBot.sendMessage(this.config.TELEGRAM_CHAT_ID, message);
+            } catch (error) {
+                console.log('❌ Error sending notification:', error.message);
+            }
+        }
+    }
+
+    logout(chatId) {
+        this.isAuthenticated = false;
+        this.currentUser = null;
+        this.userStates.clear();
+        
+        if (this.cryptoApp) {
+            this.cryptoApp.cleanup();
+        }
+        
+        const menu = { reply_markup: { remove_keyboard: true } };
+
+        this.controllerBot.sendMessage(chatId,
+            `🔐 LOGGED OUT\n\n` +
+            `Sesi telah berakhir.\n\n` +
+            `Kirim /start untuk login kembali.`,
+            menu
+        );
+    }
+
+    cleanup() {
+        if (this.controllerBot) {
+            this.controllerBot.stopPolling();
+            console.log('🎛️ Controller Bot stopped.');
+        }
+        if (this.cryptoApp) {
+            this.cryptoApp.cleanup();
+            console.log('🤖 Crypto App cleaned up.');
+        }
+    }
+}
+
+// ===================================
+// == MODIFIKASI MAIN FUNCTION
+// ===================================
+
+/**
+ * @function main
+ * @description Titik masuk utama aplikasi.
+ * Memprioritaskan mode Telegram Controller jika token ada,
+ * jika tidak, kembali ke mode Terminal.
+ */
+async function main() {
+    const ui = new ModernUI();
+    let telegramController = null;
+
+    try {
+        await ui.showAnimatedBanner(1, 0);
+        const SECURE_CONFIG = loadConfiguration();
+        
+        // PILIHAN MODE: TELEGRAM atau CLI
+        // Ini dikontrol oleh .env file Anda.
+        if (SECURE_CONFIG.TELEGRAM_CONTROLLER_TOKEN) {
+            // == MODE TELEGRAM ==
+            console.log('🎛️ Starting Telegram Full Controller...');
+            
+            telegramController = new TelegramFullController(SECURE_CONFIG);
+            
+            console.log('✅ Telegram Full Controller Active!');
+            console.log('📱 All features available via Telegram');
+            console.log(`🔐 Login via: /start di Bot Controller Anda`);
+            
+            process.on('SIGINT', () => {
+                console.log('\n👋 Bot stopped by user (Ctrl+C). Cleaning up Telegram Controller...');
+                if (telegramController) {
+                    telegramController.cleanup();
+                }
+                process.exit(0);
+            });
+            
+        } else {
+            // == MODE TERMINAL (CLI) ==
+            ui.showNotification('warning', 'TOKEN KONTROL TELEGRAM TIDAK DITEMUKAN', [
+                'TELEGRAM_CONTROLLER_TOKEN tidak ada di file .env.',
+                'Menjalankan mode terminal (CLI)...'
+            ]);
+            await ui.sleep(2000);
+            
+            await runTerminalMode(SECURE_CONFIG);
+        }
+
+    } catch (error) {
+        ui.stopLoading();
+        ui.showNotification('error', 'FATAL APPLICATION ERROR', [error.message, error.stack]);
+        console.log(error);
+        
+        if (telegramController) {
+            telegramController.cleanup();
+        }
+        
         process.exit(1);
     }
 }
